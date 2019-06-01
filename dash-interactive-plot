@@ -1,0 +1,83 @@
+import psycopg2
+import pandas as pd
+import matplotlib.pyplot as plt
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output
+import plotly.graph_objs as go
+import seaborn as sns
+#------------------------------------------------------#
+connection_string = "dbname= user= password="" host= port="  # fill connection info
+conn = psycopg2.connect(connection_string)
+cur = conn.cursor()
+sql_statement = ""  # query db
+cur.execute(sql_statement)
+df = pd.DataFrame(cur.fetchall())  # write result to dataframe
+df.columns = ["league","home_goal","away_goal","home_win_odd","draw_odd","away_win_odd"]  # rename columns
+#------------------------------------------------------#
+# create function for match result as new column
+def result(row):
+    return str(row["home_goal"]) + "-" + str(row["away_goal"])
+# create function for favourite side as new column
+def bet_favorite(row):
+    if row["home_win_odd"] < row["away_win_odd"]:
+        return "home"
+    elif row["home_win_odd"] > row["away_win_odd"]:
+        return "away"
+    else:
+        return "draw"
+df = df.dropna()
+df["goal_difference"] = df["home_goal"] - df["away_goal"]  
+df["result"] = df.apply(result,axis=1)  # apply above function (first one) to dataframe
+df["bet_favorite"] = df.apply(bet_favorite,axis=1)  # apply above function (second one) to dataframe
+#------------------------------------------------------#
+# plot 10 most frequent match result
+df1 = df.groupby("result").size().sort_values(ascending=False)
+df1 = pd.DataFrame((df1 / len(df.index) * 100)[:10])
+plt.bar(df1.index,df1[0])
+plt.xlabel("result")
+plt.ylabel("frequency (%)")
+plt.show()
+#------------------------------------------------------#
+# plot previous graph for each league using dash
+app = dash.Dash(__name__)
+leagues = df['league'].unique()
+app.layout = html.Div([
+        html.H3("league"),
+        dcc.Dropdown(
+                id='country',
+                options=[{'label': i, 'value': i} for i in leagues],
+                value='league)'
+            ),
+        dcc.Graph(id='dynamic-graph')
+    ])
+
+@app.callback(
+    Output('dynamic-graph', 'figure'),
+    [Input('country', 'value')])
+def update_graph(selectedLeague):
+    df1 = df[df["league"]==selectedLeague]
+    df2 = df1.groupby(["result"]).size().sort_values(ascending=False)
+    df2 = pd.DataFrame((df2 / len(df1.index) * 100)[:10])
+    return {
+        'data' : [go.Bar(x=df2.index,y=df2[0])],
+        'layout' : go.Layout(
+            xaxis={
+                'title': "result",
+            },
+            yaxis={
+                'title': "frequency (%)"
+            },
+            title={
+                "text" : selectedLeague
+            }
+        )
+    }
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
+#------------------------------------------------------# 
+# create boxplot using seaborn
+sns.boxplot(x="goal_difference",y="league",hue="bet_favorite",data=df)
+plt.show()
